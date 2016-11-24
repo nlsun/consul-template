@@ -104,6 +104,51 @@ type Runner struct {
 
 	// stopped is a boolean of whether the runner is stopped
 	stopped bool
+
+	// TemplateEvents is a buffered channel of template events. Every template
+	// contains an event and state when it is executed, and this channel returns
+	// those results on a per-template basis. A single template may have multiple
+	// TemplateEvents, so consumers should aggregate on the Template field. This
+	// channel is buffered, but non-blocking, so if the consumer is not reading
+	// from this channel, Consul Template will not write to it. If the channel
+	// buffer is full, Consul Template will not send an event (it does not block
+	// waiting for the consumer to read).
+	TemplateEvents chan *TemplateEvent
+}
+
+// TemplateEvent captures information about a template as it is attempted to be
+// rendered.
+type TemplateEvent struct {
+	// DidRender determines if the Template was actually written to disk. In dry
+	// mode, this will always be false, since templates are not written to disk
+	// in dry mode. A template is only rendered to disk if all dependencies are
+	// satisfied and the template is not already in place with the same contents.
+	DidRender bool
+
+	// Missing is the list of dependencies that we do not yet have data for, but
+	// are contained in the watcher. This is different from unwatched dependencies,
+	// which includes dependencies the watcher has not yet started querying for
+	// data.
+	MissingDeps []dep.Dependency
+
+	// Template is the template attempting to be rendered.
+	Template *template.Template
+
+	// Unwatched is the list of dependencies that are not present in the watcher.
+	// This value may change over time due to the n-pass evaluation.
+	UnwatchedDeps []dep.Dependency
+
+	// Used is the full list of dependencies seen in the template. Because of
+	// the n-pass evaluation, this number can change over time. The dependecnies
+	// in this list may or may not have data. This just contains the list of all
+	// dependencies parsed out of the template with the current data.
+	UsedDeps []dep.Dependency
+
+	// WouldRender determines if the template would have been rendered. A template
+	// would have been rendered if all the dependencies are satisfied, but may
+	// not have actually rendered if the file was already present or if an error
+	// occurred when trying to write the file.
+	WouldRender bool
 }
 
 // RenderEvent captures the time and events that occurred for a template
@@ -471,6 +516,12 @@ func (r *Runner) Run() error {
 	for _, tmpl := range r.templates {
 		log.Printf("[DEBUG] (runner) checking template %s", tmpl.ID())
 
+		// Create the event which we will send to the channel requesting information
+		// about this template.
+		event := &TemplateEvent{
+			Template: tmpl,
+		}
+
 		// Check if we are currently the leader instance
 		isLeader := true
 		if r.dedup != nil {
@@ -526,6 +577,11 @@ func (r *Runner) Run() error {
 			}
 		}
 
+		// TODO
+		event.MissingDeps = missing
+		event.UnwatchedDeps = unwatched
+		event.UsedDeps = used
+
 		// If there are unwatched dependencies, start the watcher and move onto the
 		// next one.
 		if len(unwatched) > 0 {
@@ -537,6 +593,12 @@ func (r *Runner) Run() error {
 					r.watcher.Add(d)
 				}
 			}
+
+			select {
+			case r.TemplateEvents <- event:
+			default:
+			}
+
 			continue
 		}
 
@@ -544,6 +606,10 @@ func (r *Runner) Run() error {
 		// ready to render and need to move on to the next one.
 		if len(missing) > 0 {
 			log.Printf("[DEBUG] (runner) missing data for %d dependencies", len(missing))
+			select {
+			case r.TemplateEvents <- event:
+			default:
+			}
 			continue
 		}
 
@@ -578,6 +644,10 @@ func (r *Runner) Run() error {
 			if err != nil {
 				return errors.Wrap(err, "error rendering "+templateConfig.Display())
 			}
+
+			// TODO
+			event.DidRender = result.DidRender
+			event.WouldRender = result.WouldRender
 
 			// If we would have rendered this template (but we did not because the
 			// contents were the same or something), we should consider this template
@@ -779,6 +849,8 @@ func (r *Runner) init() error {
 			}
 		}
 	}
+
+	r.TemplateEvents = make(chan *TemplateEvent, 50)
 
 	return nil
 }
