@@ -5,9 +5,15 @@ import (
 	"log"
 	"time"
 
-	//"github.com/mesosphere/go-mesos-operator/mesos"
+	//mesos_v1 "github.com/mesosphere/go-mesos-operator/include/mesos/v1"
+	"github.com/mesosphere/go-mesos-operator/mesos"
 	"github.com/pkg/errors"
 )
+
+type MesosTask struct {
+	Task  mesos.Task
+	Agent mesos.Agent
+}
 
 const MesosQuerySleepTime time.Duration = 2 * time.Second
 

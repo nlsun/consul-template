@@ -126,6 +126,47 @@ func keyFunc(b *Brain, used, missing *dep.Set) func(string) (string, error) {
 	}
 }
 
+func mesosTaskFrameworkFilterFunc(b *Brain, used, missing *dep.Set) func(string, string) ([]*dep.MesosTask, error) {
+	log.Printf("[DEBUG] mesosTaskFrameworkFilterFunc called")
+	return func(framework, task string) ([]*dep.MesosTask, error) {
+		log.Printf("[DEBUG] mesosTaskFrameworkFilterFunc func called")
+
+		// The way functions is tracked by the dep.<DepObj>.String() function
+		// - this has to be consistent across calls or it gets killed.
+		d := dep.NewMesosQuery("mesosTaskFrameworkFilter")
+
+		used.Add(d)
+
+		if value, ok := b.Recall(d); ok {
+			if value == nil {
+				return nil, nil
+			}
+			return mesosTaskFrameworkFilterHelper(value.(mesos.FrameworkSnapshot), framework, task), nil
+		}
+
+		missing.Add(d)
+
+		return nil, nil
+	}
+}
+
+func mesosTaskFrameworkFilterHelper(snap mesos.FrameworkSnapshot, fname, tname string) []*dep.MesosTask {
+	var output []*dep.MesosTask
+
+	for _, task := range snap.Tasks {
+		if tname != *task.Task.Name ||
+			fname != *snap.Frameworks[*task.Task.FrameworkId.Value].Framework.Name {
+			continue
+		}
+		mt := &dep.MesosTask{
+			Task:  task,
+			Agent: snap.Agents[*task.Task.AgentId.Value],
+		}
+		output = append(output, mt)
+	}
+	return output
+}
+
 func mesosTaskFunc(b *Brain, used, missing *dep.Set) func() ([]string, error) {
 	log.Printf("[DEBUG] mesosTaskFunc called")
 	return func() ([]string, error) {
