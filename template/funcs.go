@@ -127,7 +127,7 @@ func keyFunc(b *Brain, used, missing *dep.Set) func(string) (string, error) {
 
 func mesosTaskFunc(b *Brain, used, missing *dep.Set) func() ([]string, error) {
 	return func() ([]string, error) {
-		d := dep.NewMesosQuery()
+		d := dep.NewMesosQuery("mesosTask")
 
 		used.Add(d)
 

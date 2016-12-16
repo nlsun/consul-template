@@ -105,7 +105,7 @@ func (c *ClientSet) CreateMesosClient(mesosInput string) {
 	c.mesos = &mesosClient{
 		// Initialize this so that the continuous checker will start at a
 		// different value.
-		id: -1,
+		id: 1,
 	}
 
 	handleUpdate := func(snapshot mesos.Snapshot, err error) {
