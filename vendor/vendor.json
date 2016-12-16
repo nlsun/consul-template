@@ -55,6 +55,10 @@
 			"revisionTime": "2016-11-16T21:39:02Z"
 		},
 		{
+			"path": "github.com/Sirupsen/logrus",
+			"revision": ""
+		},
+		{
 			"checksumSHA1": "LLVyR2dAgkihu0+HdZF+JK0gMMs=",
 			"path": "github.com/agl/ed25519",
 			"revision": "278e1ec8e8a6e017cd07577924d6766039146ced",
@@ -793,6 +797,34 @@
 			"path": "github.com/mattn/go-shellwords",
 			"revision": "525bedee691b5a8df547cb5cf9f86b7fb1883e24",
 			"revisionTime": "2016-03-15T04:08:06Z"
+		},
+		{
+			"path": "github.com/mesosphere/go-mesos-operator/include/mesos/v1",
+			"revision": ""
+		},
+		{
+			"path": "github.com/mesosphere/go-mesos-operator/include/mesos/v1/allocator",
+			"revision": ""
+		},
+		{
+			"path": "github.com/mesosphere/go-mesos-operator/include/mesos/v1/maintenance",
+			"revision": ""
+		},
+		{
+			"path": "github.com/mesosphere/go-mesos-operator/include/mesos/v1/master",
+			"revision": ""
+		},
+		{
+			"path": "github.com/mesosphere/go-mesos-operator/include/mesos/v1/quota",
+			"revision": ""
+		},
+		{
+			"path": "github.com/mesosphere/go-mesos-operator/mesos",
+			"revision": ""
+		},
+		{
+			"path": "github.com/mesosphere/go-mesos-operator/recordio",
+			"revision": ""
 		},
 		{
 			"checksumSHA1": "hBgLmZ/4mCxmnH88mqFKBkpJFUY=",

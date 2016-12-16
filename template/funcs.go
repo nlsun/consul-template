@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
 	"reflect"
@@ -126,7 +127,12 @@ func keyFunc(b *Brain, used, missing *dep.Set) func(string) (string, error) {
 }
 
 func mesosTaskFunc(b *Brain, used, missing *dep.Set) func() ([]string, error) {
+	log.Printf("[DEBUG] mesosTaskFunc called")
 	return func() ([]string, error) {
+		log.Printf("[DEBUG] mesosTaskFunc func called")
+
+		// The way functions is tracked by the dep.<DepObj>.String() function
+		// - this has to be consistent across calls or it gets killed.
 		d := dep.NewMesosQuery("mesosTask")
 
 		used.Add(d)

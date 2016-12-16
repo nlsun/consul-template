@@ -58,6 +58,7 @@ func (d *MesosQuery) watch(lastId int, clients *ClientSet) <-chan MesosPayload {
 	watchCh := make(chan MesosPayload, 1)
 
 	go func(li int, c *ClientSet, wCh chan MesosPayload) {
+		defer log.Printf("[DEBUG] mesosquery-%s: watch terminated", d.uuid)
 		for {
 			payload := c.mesos.read()
 			//log.Printf("[DEBUG] mesosquery-%s: checking payload <%d:%d>", d.uuid, payload.id, li)
@@ -67,6 +68,7 @@ func (d *MesosQuery) watch(lastId int, clients *ClientSet) <-chan MesosPayload {
 					return
 				case wCh <- payload:
 					log.Printf("[DEBUG] mesosquery-%s: sent payload", d.uuid)
+					return
 				}
 			}
 			time.Sleep(MesosQuerySleepTime)
@@ -88,5 +90,7 @@ func (d *MesosQuery) Stop() {
 
 // String returns the human-friendly version of this dependency.
 func (d *MesosQuery) String() string {
+	// This function is the one that's used to track the task! if this changes
+	// then this will be killed!
 	return fmt.Sprintf("mesosquery-%s", d.uuid)
 }
