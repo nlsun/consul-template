@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 
 	consulapi "github.com/hashicorp/consul/api"
 	"github.com/hashicorp/go-cleanhttp"
 	rootcerts "github.com/hashicorp/go-rootcerts"
 	vaultapi "github.com/hashicorp/vault/api"
+	"github.com/mesosphere/go-mesos-operator/mesos"
 )
 
 // ClientSet is a collection of clients that dependencies use to communicate
@@ -20,6 +22,36 @@ type ClientSet struct {
 
 	vault  *vaultClient
 	consul *consulClient
+	mesos  *mesosClient
+}
+
+type mesosClient struct {
+	id      int
+	snap    MesosPayload
+	snapMut sync.RWMutex
+}
+
+type MesosPayload struct {
+	Snap mesos.FrameworkSnapshot
+	Err  error
+
+	id int
+}
+
+func (c *mesosClient) read() MesosPayload {
+	c.snapMut.RLock()
+	state := c.snap
+	c.snapMut.RUnlock()
+	return state
+}
+
+func (c *mesosClient) update(p MesosPayload) {
+	c.id += 1
+	p.id = c.id
+
+	c.snapMut.Lock()
+	c.snap = p
+	c.snapMut.Unlock()
 }
 
 // consulClient is a wrapper around a real Consul API client.
@@ -67,6 +99,36 @@ type CreateVaultClientInput struct {
 // NewClientSet creates a new client set that is ready to accept clients.
 func NewClientSet() *ClientSet {
 	return &ClientSet{}
+}
+
+func (c *ClientSet) CreateMesosClient(mesosInput string) {
+	c.mesos = &mesosClient{
+		// Initialize this so that the continuous checker will start at a
+		// different value.
+		id: -1,
+	}
+
+	handleUpdate := func(snapshot mesos.Snapshot, err error) {
+		p := MesosPayload{
+			Snap: snapshot.(mesos.FrameworkSnapshot),
+			Err:  err,
+		}
+		c.mesos.update(p)
+	}
+
+	split := strings.Split(mesosInput, "..")
+	addr := split[0]
+	var prot mesos.Protocol
+	switch split[1] {
+	case "https":
+		prot = mesos.HTTPS
+	case "http":
+		fallthrough
+	default:
+		prot = mesos.HTTP
+	}
+
+	go mesos.NewFrameworkListener(addr, prot, handleUpdate)
 }
 
 // CreateConsulClient creates a new Consul API client from the given input.

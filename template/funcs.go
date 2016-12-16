@@ -16,6 +16,7 @@ import (
 
 	"github.com/burntsushi/toml"
 	dep "github.com/hashicorp/consul-template/dependency"
+	"github.com/mesosphere/go-mesos-operator/mesos"
 	"github.com/pkg/errors"
 	yaml "gopkg.in/yaml.v2"
 )
@@ -122,6 +123,34 @@ func keyFunc(b *Brain, used, missing *dep.Set) func(string) (string, error) {
 
 		return "", nil
 	}
+}
+
+func mesosTaskFunc(b *Brain, used, missing *dep.Set) func() ([]string, error) {
+	return func() ([]string, error) {
+		d := dep.NewMesosQuery()
+
+		used.Add(d)
+
+		if value, ok := b.Recall(d); ok {
+			if value == nil {
+				return nil, nil
+			}
+			return mesosTaskHelper(value.(mesos.FrameworkSnapshot)), nil
+		}
+
+		missing.Add(d)
+
+		return nil, nil
+	}
+}
+
+func mesosTaskHelper(snap mesos.FrameworkSnapshot) []string {
+	var output []string
+
+	for _, task := range snap.Tasks {
+		output = append(output, *task.Task.Name)
+	}
+	return output
 }
 
 // keyExistsFunc returns true if a key exists, false otherwise.

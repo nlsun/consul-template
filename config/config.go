@@ -45,6 +45,8 @@ type Config struct {
 	// address or FQDN) with port.
 	Consul *string `mapstructure:"consul"`
 
+	Mesos *string `mapstructure:"mesos"`
+
 	// Dedup is used to configure the dedup settings
 	Dedup *DedupConfig `mapstructure:"deduplicate"`
 
@@ -166,6 +168,10 @@ func (c *Config) Merge(o *Config) *Config {
 
 	if o.Auth != nil {
 		r.Auth = r.Auth.Merge(o.Auth)
+	}
+
+	if o.Mesos != nil {
+		r.Mesos = o.Mesos
 	}
 
 	if o.Consul != nil {
@@ -403,6 +409,7 @@ func (c *Config) GoString() string {
 	return fmt.Sprintf("&Config{"+
 		"Auth:%#v, "+
 		"Consul:%s, "+
+		"Mesos:%s, "+
 		"Dedup:%#v, "+
 		"Exec:%#v, "+
 		"KillSignal:%s, "+
@@ -420,6 +427,7 @@ func (c *Config) GoString() string {
 		"}",
 		c.Auth,
 		StringGoString(c.Consul),
+		StringGoString(c.Mesos),
 		c.Dedup,
 		c.Exec,
 		SignalGoString(c.KillSignal),
@@ -443,6 +451,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		Auth:         DefaultAuthConfig(),
 		Consul:       stringFromEnv("CONSUL_HTTP_ADDR"),
+		Mesos:        stringFromEnv("MESOS_ADDR"),
 		Dedup:        DefaultDedupConfig(),
 		Exec:         DefaultExecConfig(),
 		KillSignal:   Signal(DefaultKillSignal),
@@ -470,6 +479,10 @@ func (c *Config) Finalize() {
 		c.Auth = DefaultAuthConfig()
 	}
 	c.Auth.Finalize()
+
+	if c.Mesos == nil {
+		c.Mesos = String("")
+	}
 
 	if c.Consul == nil {
 		c.Consul = String("")

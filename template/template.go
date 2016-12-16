@@ -190,6 +190,9 @@ func funcMap(i *funcMapInput) template.FuncMap {
 		"services":     servicesFunc(i.brain, i.used, i.missing),
 		"tree":         treeFunc(i.brain, i.used, i.missing),
 
+		// Mesos functions
+		"mesosTasks": mesosTaskFunc(i.brain, i.used, i.missing),
+
 		// Scratch
 		"scratch": func() *Scratch { return &scratch },
 

@@ -197,6 +197,11 @@ func (cli *CLI) ParseFlags(args []string) (*config.Config, bool, bool, bool, err
 	}), "config", "")
 
 	flags.Var((funcVar)(func(s string) error {
+		c.Mesos = config.String(s)
+		return nil
+	}), "mesos", "")
+
+	flags.Var((funcVar)(func(s string) error {
 		c.Consul = config.String(s)
 		return nil
 	}), "consul", "")
@@ -480,6 +485,9 @@ Options:
 
   -consul=<address>
       Sets the address of the Consul instance
+
+  -mesos=<address..protocol>
+      Sets the address and protocol (http, https)
 
   -dedup
       Enable de-duplication mode - reduces load on Consul when many instances of

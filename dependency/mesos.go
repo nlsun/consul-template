@@ -3,62 +3,67 @@ package dependency
 import (
 	"fmt"
 	"log"
+	"time"
 
-	"github.com/mesosphere/go-mesos-operator/mesos"
+	//"github.com/mesosphere/go-mesos-operator/mesos"
 	"github.com/pkg/errors"
 )
+
+const MesosQuerySleepTime time.Duration = 2 * time.Second
 
 type MesosQuery struct {
 	stopCh chan struct{}
 
-	receive chan payload
-	addr    string
+	id int
 }
 
-type payload struct {
-	snap mesos.FrameworkSnapshot
-	err  error
-}
-
-func NewMesosQuery(addr string, prot mesos.Protocol) (*MesosQuery, error) {
+func NewMesosQuery() *MesosQuery {
 	stop := make(chan struct{})
-	rec := make(chan payload)
-
-	handleUpdate := func(snapshot mesos.Snapshot, err error) {
-		p := payload{
-			snap: snapshot.(mesos.FrameworkSnapshot),
-			err:  err,
-		}
-		rec <- p
-	}
-
-	go mesos.NewFrameworkListener(addr, prot, handleUpdate)
 
 	mq := MesosQuery{
-		stopCh:  stop,
-		receive: rec,
-		addr:    addr,
+		stopCh: stop,
 	}
 
-	return &mq, nil
+	return &mq
 }
 
 func (d *MesosQuery) Fetch(clients *ClientSet, opts *QueryOptions) (interface{}, *ResponseMetadata, error) {
-	log.Printf("[TRACE] %s: FETCH %s", d, d.addr)
+	log.Printf("[TRACE] %s: FETCH %s", d, d.id)
 
 	select {
 	case <-d.stopCh:
 		log.Printf("[TRACE] %s: stopped", d)
 		return "", nil, ErrStopped
-	case p := <-d.receive:
+	case p := <-d.watch(d.id, clients):
 		log.Printf("[TRACE] %s: reported change", d)
 
-		if p.err != nil {
-			return "", nil, errors.Wrap(p.err, d.String())
+		d.id = p.id
+
+		if p.Err != nil {
+			return "", nil, errors.Wrap(p.Err, d.String())
 		}
 
-		return respWithMetadata(p.snap)
+		return respWithMetadata(p.Snap)
 	}
+}
+
+func (d *MesosQuery) watch(lastId int, clients *ClientSet) <-chan MesosPayload {
+	watchCh := make(chan MesosPayload, 1)
+
+	go func(li int, c *ClientSet, wCh chan MesosPayload) {
+		for {
+			payload := c.mesos.read()
+			if payload.id != li {
+				select {
+				case <-d.stopCh:
+					return
+				case wCh <- payload:
+				}
+			}
+			time.Sleep(MesosQuerySleepTime)
+		}
+	}(lastId, clients, watchCh)
+	return watchCh
 }
 
 // CanShare returns a boolean if this dependency is shareable.
@@ -73,5 +78,5 @@ func (d *MesosQuery) Stop() {
 
 // String returns the human-friendly version of this dependency.
 func (d *MesosQuery) String() string {
-	return fmt.Sprintf("%v", d)
+	return fmt.Sprintf("mesos %d", d.id)
 }

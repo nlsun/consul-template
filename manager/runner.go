@@ -1118,6 +1118,8 @@ func newClientSet(c *config.Config) (*dep.ClientSet, error) {
 		return nil, fmt.Errorf("runner: %s", err)
 	}
 
+	clients.CreateMesosClient(config.StringVal(c.Mesos))
+
 	return clients, nil
 }
 
