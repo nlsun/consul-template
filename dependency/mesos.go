@@ -61,7 +61,7 @@ func (d *MesosQuery) Fetch(clients *ClientSet, opts *QueryOptions) (interface{},
 }
 
 func (d *MesosQuery) watch(lastId int, clients *ClientSet) <-chan MesosPayload {
-	watchCh := make(chan MesosPayload, 1)
+	watchCh := make(chan MesosPayload)
 
 	go func(li int, c *ClientSet, wCh chan MesosPayload) {
 		defer log.Printf("[DEBUG] mesosquery-%s: watch terminated", d.uuid)
