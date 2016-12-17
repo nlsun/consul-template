@@ -11,8 +11,8 @@ import (
 )
 
 type MesosTask struct {
-	Task  mesos.Task
-	Agent mesos.Agent
+	Task  *mesos.Task
+	Agent *mesos.Agent
 }
 
 const MesosQuerySleepTime time.Duration = 2 * time.Second
