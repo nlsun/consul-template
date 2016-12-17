@@ -17,6 +17,7 @@ import (
 
 	"github.com/burntsushi/toml"
 	dep "github.com/hashicorp/consul-template/dependency"
+	mesos_v1 "github.com/mesosphere/go-mesos-operator/include/mesos/v1"
 	"github.com/mesosphere/go-mesos-operator/mesos"
 	"github.com/pkg/errors"
 	yaml "gopkg.in/yaml.v2"
@@ -155,7 +156,9 @@ func mesosTaskFrameworkFilterHelper(snap mesos.FrameworkSnapshot, fname, tname s
 
 	for _, task := range snap.Tasks {
 		if tname != *task.Task.Name ||
-			fname != *snap.Frameworks[*task.Task.FrameworkId.Value].Framework.Name {
+			fname != *snap.Frameworks[*task.Task.FrameworkId.Value].Framework.Name ||
+			(task.Status == nil && *task.Task.State != mesos_v1.TaskState_TASK_RUNNING) ||
+			(task.Status != nil && *task.Status.State != mesos_v1.TaskState_TASK_RUNNING) {
 			continue
 		}
 		mt := &dep.MesosTask{
