@@ -102,6 +102,10 @@ func NewClientSet() *ClientSet {
 }
 
 func (c *ClientSet) CreateMesosClient(mesosInput string) {
+	if mesosInput == "" {
+		return
+	}
+
 	c.mesos = &mesosClient{
 		// Initialize this so that the continuous checker will start at a
 		// different value.

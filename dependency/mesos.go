@@ -61,7 +61,10 @@ func (d *MesosQuery) Fetch(clients *ClientSet, opts *QueryOptions) (interface{},
 }
 
 func (d *MesosQuery) watch(lastId int, clients *ClientSet) <-chan MesosPayload {
-	watchCh := make(chan MesosPayload)
+	// Buffer so that the goroutine may immediately exit due to writing to
+	// buffer, instead of having to wait for the reader to also read it before
+	// exiting.
+	watchCh := make(chan MesosPayload, 1)
 
 	go func(li int, c *ClientSet, wCh chan MesosPayload) {
 		defer log.Printf("[DEBUG] mesosquery-%s: watch terminated", d.uuid)
