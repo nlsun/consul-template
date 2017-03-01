@@ -132,7 +132,13 @@ func (c *ClientSet) CreateMesosClient(mesosInput string) {
 		prot = mesos.HTTP
 	}
 
-	go mesos.NewFrameworkListener(addr, prot, handleUpdate)
+	go func() {
+		if err := mesos.NewFrameworkListener(addr, prot, handleUpdate); err != nil {
+			msg := fmt.Sprintf("[ERROR] (mesos) listener error: %s", err)
+			log.Printf(msg)
+			panic(msg)
+		}
+	}()
 }
 
 // CreateConsulClient creates a new Consul API client from the given input.
