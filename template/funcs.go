@@ -155,9 +155,9 @@ func mesosTaskFrameworkFilterHelper(snap mesos.FrameworkSnapshot, fname, tname s
 	var output []*dep.MesosTask
 
 	for _, task := range snap.Tasks {
-		if tname != *task.Task.Name ||
-			fname != *snap.Frameworks[*task.Task.FrameworkId.Value].Framework.Name ||
-			*task.Task.State != mesos_v1.TaskState_TASK_RUNNING {
+		if tname != task.Task.GetName() ||
+			fname != snap.Frameworks[task.Task.FrameworkId.GetValue()].Framework.GetName() ||
+			task.Task.GetState() != mesos_v1.TaskState_TASK_RUNNING {
 			continue
 		}
 		mt := &dep.MesosTask{
