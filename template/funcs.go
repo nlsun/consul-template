@@ -162,7 +162,7 @@ func mesosTaskFrameworkFilterHelper(snap mesos.FrameworkSnapshot, fname, tname s
 		}
 		mt := &dep.MesosTask{
 			Task:  task,
-			Agent: snap.Agents[*task.Task.AgentId.Value],
+			Agent: snap.Agents[task.Task.GetAgentId().GetValue()],
 		}
 		output = append(output, mt)
 	}
@@ -197,7 +197,7 @@ func mesosTaskHelper(snap mesos.FrameworkSnapshot) []string {
 	var output []string
 
 	for _, task := range snap.Tasks {
-		output = append(output, *task.Task.Name)
+		output = append(output, task.Task.GetName())
 	}
 	return output
 }
