@@ -10,6 +10,11 @@ import (
 	"github.com/pkg/errors"
 )
 
+// XXX It's been a while since I wrote this code, so I don't remember why I
+//   didn't go with a channel. I remember that the reason for polling is
+//   because I copied the implementation in file.go, but I feel like
+//   we could do a channel in here.
+
 type MesosTask struct {
 	Task  *mesos.Task
 	Agent *mesos.Agent
@@ -32,23 +37,23 @@ func NewMesosQuery(uuid string) *MesosQuery {
 		stopCh: stop,
 		uuid:   uuid,
 	}
-	log.Printf("[DEBUG] new mesosquery-%s", mq.uuid)
+	log.Printf("[DEBUG] (mesos) new mesosquery-%s", mq.uuid)
 
 	return &mq
 }
 
 func (d *MesosQuery) Fetch(clients *ClientSet, opts *QueryOptions) (interface{}, *ResponseMetadata, error) {
-	log.Printf("[DEBUG] mesosquery-%s: FETCH %d", d.uuid, d.id)
-	log.Printf("[TRACE] mesosquery-%s: FETCH %d", d.uuid, d.id)
+	log.Printf("[DEBUG] (mesos) mesosquery-%s: FETCH %d", d.uuid, d.id)
+	log.Printf("[TRACE] (mesos) mesosquery-%s: FETCH %d", d.uuid, d.id)
 
 	select {
 	case <-d.stopCh:
-		log.Printf("[DEBUG] mesosquery-%s: stopped", d.uuid)
-		log.Printf("[TRACE] mesosquery-%s: stopped", d.uuid)
+		log.Printf("[DEBUG] (mesos) mesosquery-%s: stopped", d.uuid)
+		log.Printf("[TRACE] (mesos) mesosquery-%s: stopped", d.uuid)
 		return "", nil, ErrStopped
 	case p := <-d.watch(d.id, clients):
-		log.Printf("[DEBUG] mesosquery-%s: reported change", d.uuid)
-		log.Printf("[TRACE] mesosquery-%s: reported change", d.uuid)
+		log.Printf("[DEBUG] (mesos) mesosquery-%s: reported change", d.uuid)
+		log.Printf("[TRACE] (mesos) mesosquery-%s: reported change", d.uuid)
 
 		d.id = p.id
 
@@ -56,7 +61,13 @@ func (d *MesosQuery) Fetch(clients *ClientSet, opts *QueryOptions) (interface{},
 			return "", nil, errors.Wrap(p.Err, d.String())
 		}
 
-		return respWithMetadata(p.Snap)
+		// Return entire payload instead of just the snapshot because
+		// consul-template does some strange equality check? Possibly
+		// because the snapshot itself is a pointer, if that doesn't
+		// change, it seems they don't treat this as an update? Since
+		// the id in here changes every time, perhaps it's enough to make
+		// the equality check think that it's unequal?
+		return respWithMetadata(p)
 	}
 }
 
@@ -67,23 +78,23 @@ func (d *MesosQuery) watch(lastId int, clients *ClientSet) <-chan MesosPayload {
 	watchCh := make(chan MesosPayload, 1)
 
 	go func(li int, c *ClientSet, wCh chan MesosPayload) {
-		defer log.Printf("[DEBUG] mesosquery-%s: watch terminated", d.uuid)
+		defer log.Printf("[DEBUG] (mesos) mesosquery-%s: watch terminated", d.uuid)
 		for {
 			payload := c.mesos.read()
-			//log.Printf("[DEBUG] mesosquery-%s: checking payload <%d:%d>", d.uuid, payload.id, li)
+			//log.Printf("[DEBUG] (mesos) mesosquery-%s: checking payload <%d:%d>", d.uuid, payload.id, li)
 			if payload.id != li {
 				select {
 				case <-d.stopCh:
 					return
 				case wCh <- payload:
-					log.Printf("[DEBUG] mesosquery-%s: sent payload", d.uuid)
+					log.Printf("[DEBUG] (mesos) mesosquery-%s: sent payload", d.uuid)
 					return
 				}
 			}
 			time.Sleep(MesosQuerySleepTime)
 		}
 	}(lastId, clients, watchCh)
-	log.Printf("[DEBUG] mesosquery-%s: started watch", d.uuid)
+	log.Printf("[DEBUG] (mesos) mesosquery-%s: started watch", d.uuid)
 	return watchCh
 }
 

@@ -128,9 +128,9 @@ func keyFunc(b *Brain, used, missing *dep.Set) func(string) (string, error) {
 }
 
 func mesosTaskFrameworkFilterFunc(b *Brain, used, missing *dep.Set) func(string, string) ([]*dep.MesosTask, error) {
-	log.Printf("[DEBUG] mesosTaskFrameworkFilterFunc called")
+	log.Printf("[DEBUG] (funcs) mesosTaskFrameworkFilterFunc called")
 	return func(framework, task string) ([]*dep.MesosTask, error) {
-		log.Printf("[DEBUG] mesosTaskFrameworkFilterFunc func called")
+		log.Printf("[DEBUG] (funcs) mesosTaskFrameworkFilterFunc func called")
 
 		// The way functions is tracked by the dep.<DepObj>.String() function
 		// - this has to be consistent across calls or it gets killed.
@@ -142,7 +142,7 @@ func mesosTaskFrameworkFilterFunc(b *Brain, used, missing *dep.Set) func(string,
 			if value == nil {
 				return nil, nil
 			}
-			return mesosTaskFrameworkFilterHelper(value.(mesos.FrameworkSnapshot), framework, task), nil
+			return mesosTaskFrameworkFilterHelper(value.(dep.MesosPayload).Snap, framework, task), nil
 		}
 
 		missing.Add(d)
@@ -155,9 +155,19 @@ func mesosTaskFrameworkFilterHelper(snap mesos.FrameworkSnapshot, fname, tname s
 	var output []*dep.MesosTask
 
 	for _, task := range snap.Tasks {
-		if tname != task.Task.GetName() ||
-			fname != snap.Frameworks[task.Task.FrameworkId.GetValue()].Framework.GetName() ||
-			task.Task.GetState() != mesos_v1.TaskState_TASK_RUNNING {
+		if tname != task.Task.GetName() {
+			log.Printf(fmt.Sprintf("[DEBUG] (funcs) task name: provided %s doesn't match %s", tname, task.Task.GetName()))
+			continue
+		}
+		if fwork, ok := snap.Frameworks[task.Task.GetFrameworkId().GetValue()]; !ok {
+			log.Printf(fmt.Sprintf("[DEBUG] (funcs) task framework: task %s framework %s not found", tname, task.Task.GetFrameworkId().GetValue()))
+			continue
+		} else if fname != fwork.Framework.GetName() {
+			log.Printf(fmt.Sprintf("[DEBUG] (funcs) framework name: provided %s doesn't match %s", fname, fwork.Framework.GetName()))
+			continue
+		}
+		if task.Task.GetState() != mesos_v1.TaskState_TASK_RUNNING {
+			log.Printf(fmt.Sprintf("[DEBUG] (funcs) task state: %s not running", tname))
 			continue
 		}
 		mt := &dep.MesosTask{
@@ -170,9 +180,9 @@ func mesosTaskFrameworkFilterHelper(snap mesos.FrameworkSnapshot, fname, tname s
 }
 
 func mesosTaskFunc(b *Brain, used, missing *dep.Set) func() ([]string, error) {
-	log.Printf("[DEBUG] mesosTaskFunc called")
+	log.Printf("[DEBUG] (funcs) mesosTaskFunc called")
 	return func() ([]string, error) {
-		log.Printf("[DEBUG] mesosTaskFunc func called")
+		log.Printf("[DEBUG] (funcs) mesosTaskFunc func called")
 
 		// The way functions is tracked by the dep.<DepObj>.String() function
 		// - this has to be consistent across calls or it gets killed.
