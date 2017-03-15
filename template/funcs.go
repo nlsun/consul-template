@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"text/template"
@@ -151,8 +152,14 @@ func mesosTaskFrameworkFilterFunc(b *Brain, used, missing *dep.Set) func(string,
 	}
 }
 
+// Returns tasks sorted by task id.
+//
+// The sorting ensures that the template is rendered the same way each
+// time, which prevents consul-template from triggering a reload
+// when there is no relevant state change.
 func mesosTaskFrameworkFilterHelper(snap mesos.FrameworkSnapshot, fname, tname string) []*dep.MesosTask {
-	var output []*dep.MesosTask
+	taskMap := make(map[string]*dep.MesosTask)
+	var tids []string
 
 	for _, task := range snap.Tasks {
 		if tname != task.Task.GetName() {
@@ -174,8 +181,19 @@ func mesosTaskFrameworkFilterHelper(snap mesos.FrameworkSnapshot, fname, tname s
 			Task:  task,
 			Agent: snap.Agents[task.Task.GetAgentId().GetValue()],
 		}
-		output = append(output, mt)
+
+		tid := task.Task.GetTaskId().GetValue()
+		taskMap[tid] = mt
+		tids = append(tids, tid)
 	}
+
+	sort.Strings(tids)
+
+	var output []*dep.MesosTask
+	for _, tid := range tids {
+		output = append(output, taskMap[tid])
+	}
+
 	return output
 }
 

@@ -359,7 +359,10 @@ func (c *ClientSet) CreateMesosClient(mesosInput string) {
 
 		// XXX investigate using a channel instead of the integer for notifications,
 		//   a channel will make this stuff easier because the ordering of
-		//   events (updates vs timeout mode) is absolute
+		//   events (updates vs timeout mode) is absolute. If we do make this
+		//   a channel, must remember to add in some kind of uuid/randomness
+		//   so that the consul-template equality check bug thing registers
+		//   an update.
 
 		for {
 			ctx := context.Background()
