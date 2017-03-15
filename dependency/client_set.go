@@ -1,6 +1,7 @@
 package dependency
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -16,10 +17,31 @@ import (
 	"github.com/mesosphere/go-mesos-operator/mesos"
 )
 
+// XXX Currently we have a set of timers associated with tasks in order
+//   to keep track of which tasks to keep alive. In addition, we keep
+//   around any frameworks/agents that are associated with these tasks.
+//   This approach basically keeps around a fake view of cluster state.
+//   An alternative approach is to maintain 2 completely separate state,
+//   the current one, and one that is completely made up of timers. This
+//   approach has less logic when it comes to maintaining state, and instead
+//   pushes the complexity to template render time, which is when we
+//   reconcile the 2 states.
+
+// XXX Another thing to consider is that we might be able to wait for
+//   an AGENT_REMOVED message instead of using a timeout. The issue with
+//   that is that we'd need some signal that we recieve that message
+//   from go-mesos-operater, which currently abstracts away the individual
+//   messages that are sent. Possibly hook up a channel that alerts on
+//   agent removal events? Or even simpler, just have a field in the
+//   state that is passed from go-mesos-operator include a special
+//   slice that lists agents that have been removed in that state change.
+//
 // Mesos is configured to wait for 10 minutes for an agent to reconnect. Just
 // to be safe, we will wait longer than that.
 //
 // Time is in seconds
+//// XXX FOR DEBUG PURPOSES
+//const failoverTimeout int64 = 30
 const failoverTimeout int64 = 60 * 11
 
 const timerCheckInterval time.Duration = time.Second * 2
@@ -42,8 +64,19 @@ type mesosClient struct {
 
 	// Map from mesos ID to Unix time
 	//
-	// This map also depend on snapMut
+	// This map also depends on snapMut
 	taskTimers map[string]int64
+
+	// These maps track the references to frameworks/agents that are
+	// carried over as dependencies of tasks. These should never
+	// point to "real" values, only "carried" ones.
+	//
+	// These are closely associated with taskTimers, so they should roughly
+	// appear wherever those do
+	//
+	// These maps also depend on snapMut
+	carriedFwRef map[string]int
+	carriedAgRef map[string]int
 
 	// This is set when a failover is detected. It is cleared on the
 	// next update.
@@ -85,39 +118,41 @@ func (c *mesosClient) update(pload MesosPayload) {
 
 	// Pick out the tasks to carry over
 	for tid, oldTask := range c.snap.Snap.Tasks {
+		fid := oldTask.Task.GetFrameworkId().GetValue()
+		agid := oldTask.Task.GetAgentId().GetValue()
 		if _, ok := pload.Snap.Tasks[tid]; ok {
 			// The task already exists in the new snapshot
 			log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos update task exists in new snapshot: %s", tid))
-			c.clearTimer(tid)
+			c.maybeClearTimer(tid, fid, agid)
 			continue
 		}
-		if _, ok := pload.Snap.Agents[oldTask.Task.GetAgentId().GetValue()]; ok {
+		if _, ok := pload.Snap.Agents[agid]; ok {
 			// The task does not exist in the new snapshot yet the
 			// old agent has reconnected, so we delete the old task.
 			log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos update agent reconnected without task: %s", tid))
-			c.clearTimer(tid)
+			c.maybeClearTimer(tid, fid, agid)
 			continue
 		}
-		log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos update carrying task: %s", tid))
 		carriedTasks = append(carriedTasks, tid)
 	}
 
-	// Modify the new snapshot with carried over values
+	// Reset carry maps, so we don't have to keep track of which ones have
+	// been replaced by real values.
+	c.carriedFwRef = make(map[string]int)
+	c.carriedAgRef = make(map[string]int)
+
+	// Update carry maps
 	//
-	// The reason this is a separate step is because we don't want to modify
-	// the new snapshot while the new snapshot is used to compute which
-	// values are to be carried over.
+	// The reason this is a separate step is because we want to count the
+	// number of references to each carried value, which we have to do
+	// before modifying the snapshot.
 	for _, tid := range carriedTasks {
-		// XXX if we carry over frameworks and agents, we also need to get
-		//   these cleaned up by the checktimers
 		oldTask := c.snap.Snap.Tasks[tid]
-		pload.Snap.Tasks[tid] = oldTask
 
 		// If we carry the task, we also carry over the associated framework
 		fid := oldTask.Task.GetFrameworkId().GetValue()
 		if _, ok := pload.Snap.Frameworks[fid]; !ok {
-			log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos update carrying task/framework %s/%s", tid, fid))
-			pload.Snap.Frameworks[fid] = c.snap.Snap.Frameworks[fid]
+			c.fwRefUp(fid)
 		}
 
 		// If we carry the task, we also carry over the associated agent
@@ -126,7 +161,24 @@ func (c *mesosClient) update(pload MesosPayload) {
 		// we wouldn't be carrying over the task in the first place. So
 		// we just blindly overwrite it.
 		agid := oldTask.Task.GetAgentId().GetValue()
-		log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos update blind carrying task/agent %s/%s", tid, agid))
+		c.agRefUp(agid)
+	}
+
+	// Modify the new snapshot with carried over values
+	//
+	// The reason this is a separate step is because we don't want to modify
+	// the new snapshot while the new snapshot is used to compute which
+	// values are to be carried over.
+	for _, tid := range carriedTasks {
+		log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos update carrying task: %s", tid))
+		pload.Snap.Tasks[tid] = c.snap.Snap.Tasks[tid]
+	}
+	for fid, _ := range c.carriedFwRef {
+		log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos update carrying framework %s", fid))
+		pload.Snap.Frameworks[fid] = c.snap.Snap.Frameworks[fid]
+	}
+	for agid, _ := range c.carriedAgRef {
+		log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos update carrying agent %s", agid))
 		pload.Snap.Agents[agid] = c.snap.Snap.Agents[agid]
 	}
 
@@ -145,6 +197,68 @@ func (c *mesosClient) update(pload MesosPayload) {
 		}
 	}
 	c.snapMut.Unlock()
+}
+
+func (c *mesosClient) fwRefUp(fid string) {
+	// Assumes that it's in a locked context.
+	// Depends on snapMut.
+
+	log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos fw ref up: %s", fid))
+	refUpHelper(c.carriedFwRef, fid)
+}
+
+func (c *mesosClient) agRefUp(agid string) {
+	// Assumes that it's in a locked context.
+	// Depends on snapMut.
+
+	log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos ag ref up: %s", agid))
+	refUpHelper(c.carriedAgRef, agid)
+}
+
+func refUpHelper(refMap map[string]int, id string) {
+	if count, ok := refMap[id]; !ok {
+		log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos ref up: creating %s", id))
+		refMap[id] = 1
+	} else {
+		refMap[id] = count + 1
+	}
+}
+
+func (c *mesosClient) fwRefDown(fid string) {
+	// Assumes that it's in a locked context.
+	// Depends on snapMut.
+
+	log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos fw ref down: %s", fid))
+	refDownHelper(c.carriedFwRef, fid)
+}
+
+func (c *mesosClient) agRefDown(agid string) {
+	// Assumes that it's in a locked context.
+	// Depends on snapMut.
+
+	log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos ag ref down: %s", agid))
+	refDownHelper(c.carriedAgRef, agid)
+}
+
+func refDownHelper(refMap map[string]int, id string) {
+	// XXX Should write a test that ensures that this never drops below 1
+
+	//// XXX FUNCTION FOR DEBUG ONLY
+	//defer func(rmap map[string]int) {
+	//	if count, ok := rmap[id]; !ok {
+	//		return
+	//	} else if count <= 0 {
+	//		log.Printf(fmt.Sprintf("[ERROR] (clients) mesos ref TOO LOW: %s %d", id, count))
+	//	}
+	//}(refMap)
+
+	count := refMap[id]
+	if count == 1 {
+		log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos ref down: deleting %s", id))
+		delete(refMap, id)
+		return
+	}
+	refMap[id] = count - 1
 }
 
 // consulClient is a wrapper around a real Consul API client.
@@ -206,7 +320,9 @@ func (c *ClientSet) CreateMesosClient(mesosInput string) {
 		taskTimers: make(map[string]int64),
 	}
 
-	handleUpdate := func(snapshot mesos.FrameworkSnapshot, err error) {
+	handleUpdate := func(ctx context.Context, snapshot mesos.FrameworkSnapshot, err error) {
+		// Context is currently unused.
+
 		p := MesosPayload{
 			Snap: snapshot,
 			Err:  err,
@@ -246,7 +362,8 @@ func (c *ClientSet) CreateMesosClient(mesosInput string) {
 		//   events (updates vs timeout mode) is absolute
 
 		for {
-			if err := mesos.NewFrameworkListener(addr, prot, handleUpdate); err != nil {
+			ctx := context.Background()
+			if err := mesos.NewFrameworkListener(ctx, addr, prot, handleUpdate); err != nil {
 				msg := fmt.Sprintf("[INFO] (clients) mesos listener crashed, assuming mesos leader failover: %s", err)
 				log.Printf(msg)
 			}
@@ -267,16 +384,26 @@ func (c *ClientSet) CreateMesosClient(mesosInput string) {
 	}(c.mesos)
 }
 
-func (c *mesosClient) clearTimer(taskId string) {
+// Only clears timer if timer exists
+func (c *mesosClient) maybeClearTimer(taskId, frameworkId, agentId string) {
+	if _, ok := c.taskTimers[taskId]; ok {
+		c.clearTimer(taskId, frameworkId, agentId)
+	}
+}
+
+func (c *mesosClient) clearTimer(taskId, frameworkId, agentId string) {
 	// Assumes that it's in a locked context.
 	// Depends on snapMut.
 
 	log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos clearing task timer: %s", taskId))
+	c.fwRefDown(frameworkId)
+	c.agRefDown(agentId)
 	delete(c.taskTimers, taskId)
 }
 
 // Scan through the active timers and clear the timer and delete associated
-// task if it timed out. Triggers an update if something changes.
+// task/framework/agent if it timed out. Triggers an update if
+// something changes.
 func (c *mesosClient) checkTimers() {
 	// Assumes that it's in a locked context.
 	// Depends on snapMut.
@@ -287,9 +414,20 @@ func (c *mesosClient) checkTimers() {
 		if endtime > now {
 			continue
 		}
-		c.clearTimer(tid)
+		fid := c.snap.Snap.Tasks[tid].Task.GetFrameworkId().GetValue()
+		agid := c.snap.Snap.Tasks[tid].Task.GetAgentId().GetValue()
+		c.clearTimer(tid, fid, agid)
+
 		log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos timer expired deleting task: %s", tid))
 		delete(c.snap.Snap.Tasks, tid)
+		if _, ok := c.carriedFwRef[fid]; !ok {
+			log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos timer deleting unreferenced framework: %s", fid))
+			delete(c.snap.Snap.Frameworks, fid)
+		}
+		if _, ok := c.carriedAgRef[agid]; !ok {
+			log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos timer deleting unreferenced agent: %s", agid))
+			delete(c.snap.Snap.Agents, agid)
+		}
 		changed = true
 	}
 
