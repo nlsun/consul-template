@@ -197,39 +197,6 @@ func mesosTaskFrameworkFilterHelper(snap mesos.FrameworkSnapshot, fname, tname s
 	return output
 }
 
-func mesosTaskFunc(b *Brain, used, missing *dep.Set) func() ([]string, error) {
-	log.Printf("[DEBUG] (funcs) mesosTaskFunc called")
-	return func() ([]string, error) {
-		log.Printf("[DEBUG] (funcs) mesosTaskFunc func called")
-
-		// The way functions is tracked by the dep.<DepObj>.String() function
-		// - this has to be consistent across calls or it gets killed.
-		d := dep.NewMesosQuery("mesosTask")
-
-		used.Add(d)
-
-		if value, ok := b.Recall(d); ok {
-			if value == nil {
-				return nil, nil
-			}
-			return mesosTaskHelper(value.(mesos.FrameworkSnapshot)), nil
-		}
-
-		missing.Add(d)
-
-		return nil, nil
-	}
-}
-
-func mesosTaskHelper(snap mesos.FrameworkSnapshot) []string {
-	var output []string
-
-	for _, task := range snap.Tasks {
-		output = append(output, task.Task.GetName())
-	}
-	return output
-}
-
 // keyExistsFunc returns true if a key exists, false otherwise.
 func keyExistsFunc(b *Brain, used, missing *dep.Set) func(string) (bool, error) {
 	return func(s string) (bool, error) {

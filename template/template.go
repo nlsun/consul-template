@@ -191,7 +191,6 @@ func funcMap(i *funcMapInput) template.FuncMap {
 		"tree":         treeFunc(i.brain, i.used, i.missing),
 
 		// Mesos functions
-		"mesosTasks":               mesosTaskFunc(i.brain, i.used, i.missing),
 		"mesosTaskFrameworkFilter": mesosTaskFrameworkFilterFunc(i.brain, i.used, i.missing),
 
 		// Scratch
