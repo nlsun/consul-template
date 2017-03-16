@@ -162,27 +162,27 @@ func mesosTaskFrameworkFilterHelper(snap mesos.FrameworkSnapshot, fname, tname s
 	var tids []string
 
 	for _, task := range snap.Tasks {
-		if tname != task.Task.GetName() {
-			log.Printf(fmt.Sprintf("[DEBUG] (funcs) task name: provided %s doesn't match %s", tname, task.Task.GetName()))
+		if tname != task.GetName() {
+			log.Printf(fmt.Sprintf("[DEBUG] (funcs) task name: provided %s doesn't match %s", tname, task.GetName()))
 			continue
 		}
-		if fwork, ok := snap.Frameworks[task.Task.GetFrameworkId().GetValue()]; !ok {
-			log.Printf(fmt.Sprintf("[DEBUG] (funcs) task framework: task %s framework %s not found", tname, task.Task.GetFrameworkId().GetValue()))
+		if fwork, ok := snap.Frameworks[task.GetFrameworkId().GetValue()]; !ok {
+			log.Printf(fmt.Sprintf("[DEBUG] (funcs) task framework: task %s framework %s not found", tname, task.GetFrameworkId().GetValue()))
 			continue
-		} else if fname != fwork.Framework.GetName() {
-			log.Printf(fmt.Sprintf("[DEBUG] (funcs) framework name: provided %s doesn't match %s", fname, fwork.Framework.GetName()))
+		} else if fname != fwork.GetName() {
+			log.Printf(fmt.Sprintf("[DEBUG] (funcs) framework name: provided %s doesn't match %s", fname, fwork.GetName()))
 			continue
 		}
-		if task.Task.GetState() != mesos_v1.TaskState_TASK_RUNNING {
+		if task.GetState() != mesos_v1.TaskState_TASK_RUNNING {
 			log.Printf(fmt.Sprintf("[DEBUG] (funcs) task state: %s not running", tname))
 			continue
 		}
 		mt := &dep.MesosTask{
 			Task:  task,
-			Agent: snap.Agents[task.Task.GetAgentId().GetValue()],
+			Agent: snap.Agents[task.GetAgentId().GetValue()],
 		}
 
-		tid := task.Task.GetTaskId().GetValue()
+		tid := task.GetTaskId().GetValue()
 		taskMap[tid] = mt
 		tids = append(tids, tid)
 	}

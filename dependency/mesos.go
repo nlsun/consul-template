@@ -4,8 +4,7 @@ import (
 	"log"
 	"time"
 
-	//mesos_v1 "github.com/mesosphere/go-mesos-operator/include/mesos/v1"
-	"github.com/mesosphere/go-mesos-operator/mesos"
+	mesos_v1 "github.com/mesosphere/go-mesos-operator/include/mesos/v1"
 	"github.com/pkg/errors"
 )
 
@@ -15,8 +14,8 @@ import (
 //   we could do a channel in here.
 
 type MesosTask struct {
-	Task  *mesos.Task
-	Agent *mesos.Agent
+	Task  *mesos_v1.Task
+	Agent *mesos_v1.AgentInfo
 }
 
 const MesosQuerySleepTime time.Duration = 2 * time.Second

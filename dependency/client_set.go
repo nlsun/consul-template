@@ -118,8 +118,8 @@ func (c *mesosClient) update(pload MesosPayload) {
 
 	// Pick out the tasks to carry over
 	for tid, oldTask := range c.snap.Snap.Tasks {
-		fid := oldTask.Task.GetFrameworkId().GetValue()
-		agid := oldTask.Task.GetAgentId().GetValue()
+		fid := oldTask.GetFrameworkId().GetValue()
+		agid := oldTask.GetAgentId().GetValue()
 		if _, ok := pload.Snap.Tasks[tid]; ok {
 			// The task already exists in the new snapshot
 			log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos update task exists in new snapshot: %s", tid))
@@ -150,7 +150,7 @@ func (c *mesosClient) update(pload MesosPayload) {
 		oldTask := c.snap.Snap.Tasks[tid]
 
 		// If we carry the task, we also carry over the associated framework
-		fid := oldTask.Task.GetFrameworkId().GetValue()
+		fid := oldTask.GetFrameworkId().GetValue()
 		if _, ok := pload.Snap.Frameworks[fid]; !ok {
 			c.fwRefUp(fid)
 		}
@@ -160,7 +160,7 @@ func (c *mesosClient) update(pload MesosPayload) {
 		// It's not possible for the task's agent to already exist, otherwise
 		// we wouldn't be carrying over the task in the first place. So
 		// we just blindly overwrite it.
-		agid := oldTask.Task.GetAgentId().GetValue()
+		agid := oldTask.GetAgentId().GetValue()
 		c.agRefUp(agid)
 	}
 
@@ -417,8 +417,8 @@ func (c *mesosClient) checkTimers() {
 		if endtime > now {
 			continue
 		}
-		fid := c.snap.Snap.Tasks[tid].Task.GetFrameworkId().GetValue()
-		agid := c.snap.Snap.Tasks[tid].Task.GetAgentId().GetValue()
+		fid := c.snap.Snap.Tasks[tid].GetFrameworkId().GetValue()
+		agid := c.snap.Snap.Tasks[tid].GetAgentId().GetValue()
 		c.clearTimer(tid, fid, agid)
 
 		log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos timer expired deleting task: %s", tid))
