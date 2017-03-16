@@ -1,7 +1,6 @@
 package dependency
 
 import (
-	"fmt"
 	"log"
 	"time"
 
@@ -26,34 +25,31 @@ type MesosQuery struct {
 	stopCh chan struct{}
 
 	id int // this is used to track changes in the query
-
-	uuid string // this labels each query
 }
 
-func NewMesosQuery(uuid string) *MesosQuery {
+func NewMesosQuery() *MesosQuery {
 	stop := make(chan struct{})
 
 	mq := MesosQuery{
 		stopCh: stop,
-		uuid:   uuid,
 	}
-	log.Printf("[DEBUG] (mesos) new mesosquery-%s", mq.uuid)
+	log.Printf("[DEBUG] (mesos) new mesosquery")
 
 	return &mq
 }
 
 func (d *MesosQuery) Fetch(clients *ClientSet, opts *QueryOptions) (interface{}, *ResponseMetadata, error) {
-	log.Printf("[DEBUG] (mesos) mesosquery-%s: FETCH %d", d.uuid, d.id)
-	log.Printf("[TRACE] (mesos) mesosquery-%s: FETCH %d", d.uuid, d.id)
+	log.Printf("[DEBUG] (mesos) mesosquery: FETCH %d", d.id)
+	log.Printf("[TRACE] (mesos) mesosquery: FETCH %d", d.id)
 
 	select {
 	case <-d.stopCh:
-		log.Printf("[DEBUG] (mesos) mesosquery-%s: stopped", d.uuid)
-		log.Printf("[TRACE] (mesos) mesosquery-%s: stopped", d.uuid)
+		log.Printf("[DEBUG] (mesos) mesosquery: stopped")
+		log.Printf("[TRACE] (mesos) mesosquery: stopped")
 		return "", nil, ErrStopped
 	case p := <-d.watch(d.id, clients):
-		log.Printf("[DEBUG] (mesos) mesosquery-%s: reported change", d.uuid)
-		log.Printf("[TRACE] (mesos) mesosquery-%s: reported change", d.uuid)
+		log.Printf("[DEBUG] (mesos) mesosquery: reported change")
+		log.Printf("[TRACE] (mesos) mesosquery: reported change")
 
 		d.id = p.id
 
@@ -67,6 +63,9 @@ func (d *MesosQuery) Fetch(clients *ClientSet, opts *QueryOptions) (interface{},
 		// change, it seems they don't treat this as an update? Since
 		// the id in here changes every time, perhaps it's enough to make
 		// the equality check think that it's unequal?
+		//
+		// Or maybe even you can have a flag that is just a bool, and
+		// just flip it with every fetch.
 		return respWithMetadata(p)
 	}
 }
@@ -78,23 +77,23 @@ func (d *MesosQuery) watch(lastId int, clients *ClientSet) <-chan MesosPayload {
 	watchCh := make(chan MesosPayload, 1)
 
 	go func(li int, c *ClientSet, wCh chan MesosPayload) {
-		defer log.Printf("[DEBUG] (mesos) mesosquery-%s: watch terminated", d.uuid)
+		defer log.Printf("[DEBUG] (mesos) mesosquery: watch terminated")
 		for {
 			payload := c.mesos.read()
-			//log.Printf("[DEBUG] (mesos) mesosquery-%s: checking payload <%d:%d>", d.uuid, payload.id, li)
+			//log.Printf("[DEBUG] (mesos) mesosquery: checking payload <%d:%d>", payload.id, li)
 			if payload.id != li {
 				select {
 				case <-d.stopCh:
 					return
 				case wCh <- payload:
-					log.Printf("[DEBUG] (mesos) mesosquery-%s: sent payload", d.uuid)
+					log.Printf("[DEBUG] (mesos) mesosquery: sent payload")
 					return
 				}
 			}
 			time.Sleep(MesosQuerySleepTime)
 		}
 	}(lastId, clients, watchCh)
-	log.Printf("[DEBUG] (mesos) mesosquery-%s: started watch", d.uuid)
+	log.Printf("[DEBUG] (mesos) mesosquery: started watch")
 	return watchCh
 }
 
@@ -112,5 +111,6 @@ func (d *MesosQuery) Stop() {
 func (d *MesosQuery) String() string {
 	// This function is the one that's used to track the task! if this changes
 	// then this will be killed!
-	return fmt.Sprintf("mesosquery-%s", d.uuid)
+	return "mesosquery"
+
 }

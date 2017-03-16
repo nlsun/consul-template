@@ -135,7 +135,7 @@ func mesosTaskFrameworkFilterFunc(b *Brain, used, missing *dep.Set) func(string,
 
 		// The way functions is tracked by the dep.<DepObj>.String() function
 		// - this has to be consistent across calls or it gets killed.
-		d := dep.NewMesosQuery("mesosTaskFrameworkFilter")
+		d := dep.NewMesosQuery()
 
 		used.Add(d)
 
