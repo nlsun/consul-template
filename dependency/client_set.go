@@ -99,7 +99,12 @@ func (c *mesosClient) read() MesosPayload {
 	//   once they're set. As such, there might not be a point to this lock
 	//   here at all.
 	c.snapMut.RLock()
-	state := c.snap
+	sclone, err := mesos.CloneSnapshot(c.snap.Snap)
+	state := MesosPayload{
+		Snap: sclone,
+		Err:  err,
+		id:   c.snap.id,
+	}
 	c.snapMut.RUnlock()
 	return state
 }
