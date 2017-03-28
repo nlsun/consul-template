@@ -2,7 +2,9 @@ package dependency
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/binary"
 	"fmt"
 	"log"
 	"net/http"
@@ -58,8 +60,10 @@ type ClientSet struct {
 }
 
 type mesosClient struct {
-	id      int
-	snap    MesosPayload
+	// The id changes when something about the snapshot has changed
+	id uint64
+
+	snap    mesos.FrameworkSnapshot
 	snapMut sync.RWMutex
 
 	// Map from mesos ID to Unix time
@@ -83,37 +87,116 @@ type mesosClient struct {
 	//
 	// Depends on snapMut
 	leaderFailover bool
+
+	subscribeMut sync.RWMutex
+
+	// Subscribers to receive updates on Mesos state
+	//
+	// Depends on subscribeMut
+	subscribers map[string]chan struct{}
 }
 
 type MesosPayload struct {
 	Snap mesos.FrameworkSnapshot
 	Err  error
 
-	id int
+	// The id from the mesosClient is copied when this is created.
+	id uint64
+}
+
+// A bad function that keeps looping until it successfully returns.
+func mustRandUint64() uint64 {
+	var buf [16]byte
+	var err error
+
+	for {
+		_, err = rand.Read(buf[:])
+		if err == nil {
+			break
+		}
+		log.Printf("[DEBUG] (clients) mustRandUint64: %s", err)
+	}
+
+	return binary.BigEndian.Uint64(buf[:])
+}
+
+// Returns a channel that carries signals. A subscribe with the same id
+// will result in the same channel being returned.
+func (c *mesosClient) subscribe(id string) <-chan struct{} {
+	// There actually should only be 1 listener with how consul-template works.
+	// My impression of how this works is that consul-template will call a
+	// function from template/func and all of these will call the same
+	// mesosquery from dependency/mesos. My impression of how the "brain" works
+	// is that since these all use the same thing, it'll actually only
+	// have 1 listener, but we should check here. Maybe run a couple manual
+	// tests that log/alert/panic when more than 1 listener exists. Also test
+	// if there are multiple calls to the functions within the template.
+	//
+	// There are multiple calls to the Func in template/func. However, if they
+	// have the same dependency (dependency/mesos in our case) then only 1 will
+	// be run, which is what we want.
+
+	var subC chan struct{}
+
+	c.subscribeMut.Lock()
+
+	if s, ok := c.subscribers[id]; ok {
+		log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos subscribe exists: %s", id))
+		subC = s
+	} else {
+		log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos new subscribe: %s", id))
+		// Channel must have buffer size 1, that way we can have non-blocking
+		// writes while still having having signals that alert whenever a change
+		// has occurred since the subscriber has last checked.
+		subC = make(chan struct{}, 1)
+
+		// Seed it with an update so subscriber grabs initial state
+		subC <- struct{}{}
+
+		c.subscribers[id] = subC
+	}
+	c.subscribeMut.Unlock()
+	return subC
+}
+
+func (c *mesosClient) unsubscribe(id string) {
+	c.subscribeMut.Lock()
+	delete(c.subscribers, id)
+	c.subscribeMut.Unlock()
+}
+
+func (c *mesosClient) notify() {
+	c.subscribeMut.RLock()
+	log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos notify"))
+	for _, sub := range c.subscribers {
+		select {
+		case sub <- struct{}{}:
+			// noop
+		default:
+			// noop for nonblocking
+		}
+
+	}
+	c.subscribeMut.RUnlock()
 }
 
 func (c *mesosClient) read() MesosPayload {
-	// XXX There might be a race condition here, where c.snap can be modified
-	//   between the time that the lock is unlocked, and state is returned.
-	//   We should try instead to guarantee that snapshots aren't modified
-	//   once they're set. As such, there might not be a point to this lock
-	//   here at all.
 	c.snapMut.RLock()
-	sclone, err := mesos.CloneSnapshot(c.snap.Snap)
-	state := MesosPayload{
+	sclone, err := mesos.CloneSnapshot(c.snap)
+	mp := MesosPayload{
 		Snap: sclone,
 		Err:  err,
-		id:   c.snap.id,
+		id:   c.id,
 	}
 	c.snapMut.RUnlock()
-	return state
+	return mp
 }
 
 func (c *mesosClient) update(pload MesosPayload) {
 	c.snapMut.Lock()
 	log.Printf("[DEBUG] (clients) mesos update: running update")
-	c.id += 1
-	c.snap.id = c.id
+	c.id = mustRandUint64()
+	c.notify()
 
 	// We check timers before pick out tasks to carry over. Otherwise,
 	// expired tasks will get carried over before they can be deleted.
@@ -122,7 +205,7 @@ func (c *mesosClient) update(pload MesosPayload) {
 	var carriedTasks []string
 
 	// Pick out the tasks to carry over
-	for tid, oldTask := range c.snap.Snap.Tasks {
+	for tid, oldTask := range c.snap.Tasks {
 		fid := oldTask.GetFrameworkId().GetValue()
 		agid := oldTask.GetAgentId().GetValue()
 		if _, ok := pload.Snap.Tasks[tid]; ok {
@@ -134,7 +217,7 @@ func (c *mesosClient) update(pload MesosPayload) {
 		if _, ok := pload.Snap.Agents[agid]; ok {
 			// The task does not exist in the new snapshot yet the
 			// old agent has reconnected, so we delete the old task.
-			log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos update agent reconnected without task: %s", tid))
+			log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos update task deleted or agent reconnected without task: %s", tid))
 			c.maybeClearTimer(tid, fid, agid)
 			continue
 		}
@@ -152,7 +235,7 @@ func (c *mesosClient) update(pload MesosPayload) {
 	// number of references to each carried value, which we have to do
 	// before modifying the snapshot.
 	for _, tid := range carriedTasks {
-		oldTask := c.snap.Snap.Tasks[tid]
+		oldTask := c.snap.Tasks[tid]
 
 		// If we carry the task, we also carry over the associated framework
 		fid := oldTask.GetFrameworkId().GetValue()
@@ -176,21 +259,21 @@ func (c *mesosClient) update(pload MesosPayload) {
 	// values are to be carried over.
 	for _, tid := range carriedTasks {
 		log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos update carrying task: %s", tid))
-		pload.Snap.Tasks[tid] = c.snap.Snap.Tasks[tid]
+		pload.Snap.Tasks[tid] = c.snap.Tasks[tid]
 	}
 	for fid, _ := range c.carriedFwRef {
 		log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos update carrying framework %s", fid))
-		pload.Snap.Frameworks[fid] = c.snap.Snap.Frameworks[fid]
+		pload.Snap.Frameworks[fid] = c.snap.Frameworks[fid]
 	}
 	for agid, _ := range c.carriedAgRef {
 		log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos update carrying agent %s", agid))
-		pload.Snap.Agents[agid] = c.snap.Snap.Agents[agid]
+		pload.Snap.Agents[agid] = c.snap.Agents[agid]
 	}
 
 	// Replace the old snapshot with new one
-	c.snap.Snap.Frameworks = pload.Snap.Frameworks
-	c.snap.Snap.Agents = pload.Snap.Agents
-	c.snap.Snap.Tasks = pload.Snap.Tasks
+	c.snap.Frameworks = pload.Snap.Frameworks
+	c.snap.Agents = pload.Snap.Agents
+	c.snap.Tasks = pload.Snap.Tasks
 
 	if c.leaderFailover {
 		c.leaderFailover = false
@@ -319,10 +402,12 @@ func (c *ClientSet) CreateMesosClient(mesosInput string) {
 	}
 
 	c.mesos = &mesosClient{
-		// Initialize this so that the continuous checker will start at a
-		// different value.
-		id:         1,
-		taskTimers: make(map[string]int64),
+		// The id here must be initialized so that the listener gets something
+		// that is guaranteed to be different from anything it has.
+		id: mustRandUint64(),
+
+		taskTimers:  make(map[string]int64),
+		subscribers: make(map[string]chan struct{}),
 	}
 
 	handleUpdate := func(ctx context.Context, snapshot mesos.FrameworkSnapshot, err error) {
@@ -361,13 +446,6 @@ func (c *ClientSet) CreateMesosClient(mesosInput string) {
 		//   - connect to the "leader" with subscribe, with with a context so
 		//     it can cancel!
 		//   - whenever the leader changes, cancel the subscribe, and restart it
-
-		// XXX investigate using a channel instead of the integer for notifications,
-		//   a channel will make this stuff easier because the ordering of
-		//   events (updates vs timeout mode) is absolute. If we do make this
-		//   a channel, must remember to add in some kind of uuid/randomness
-		//   so that the consul-template equality check bug thing registers
-		//   an update.
 
 		for {
 			ctx := context.Background()
@@ -422,19 +500,19 @@ func (c *mesosClient) checkTimers() {
 		if endtime > now {
 			continue
 		}
-		fid := c.snap.Snap.Tasks[tid].GetFrameworkId().GetValue()
-		agid := c.snap.Snap.Tasks[tid].GetAgentId().GetValue()
+		fid := c.snap.Tasks[tid].GetFrameworkId().GetValue()
+		agid := c.snap.Tasks[tid].GetAgentId().GetValue()
 		c.clearTimer(tid, fid, agid)
 
 		log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos timer expired deleting task: %s", tid))
-		delete(c.snap.Snap.Tasks, tid)
+		delete(c.snap.Tasks, tid)
 		if _, ok := c.carriedFwRef[fid]; !ok {
 			log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos timer deleting unreferenced framework: %s", fid))
-			delete(c.snap.Snap.Frameworks, fid)
+			delete(c.snap.Frameworks, fid)
 		}
 		if _, ok := c.carriedAgRef[agid]; !ok {
 			log.Printf(fmt.Sprintf("[DEBUG] (clients) mesos timer deleting unreferenced agent: %s", agid))
-			delete(c.snap.Snap.Agents, agid)
+			delete(c.snap.Agents, agid)
 		}
 		changed = true
 	}
@@ -458,8 +536,8 @@ func (c *mesosClient) checkTimers() {
 		//   2017/03/14 18:36:15.846257 [DEBUG] (mesos) mesosquery-mesosTaskFrameworkFilter: FETCH 4
 		//   2017/03/14 18:36:15.846272 [DEBUG] (mesos) mesosquery-mesosTaskFrameworkFilter: started watch
 
-		c.id += 1
-		c.snap.id = c.id
+		c.id = mustRandUint64()
+		c.notify()
 	}
 }
 

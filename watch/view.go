@@ -152,6 +152,7 @@ func (v *View) fetch(doneCh chan<- struct{}, errCh chan<- error) {
 		if err != nil {
 			if err == dep.ErrStopped {
 				log.Printf("[TRACE] (view) %s reported stop", v.Dependency)
+				log.Printf("[DEBUG] (view) %s reported stop", v.Dependency)
 			} else {
 				errCh <- err
 			}
@@ -167,6 +168,7 @@ func (v *View) fetch(doneCh chan<- struct{}, errCh chan<- error) {
 		if allowStale && rm.LastContact > v.config.MaxStale {
 			allowStale = false
 			log.Printf("[TRACE] (view) %s stale data (last contact exceeded max_stale)", v.Dependency)
+			log.Printf("[DEBUG] (view) %s stale data (last contact exceeded max_stale)", v.Dependency)
 			continue
 		}
 
@@ -176,30 +178,41 @@ func (v *View) fetch(doneCh chan<- struct{}, errCh chan<- error) {
 
 		if rm.LastIndex == v.lastIndex {
 			log.Printf("[TRACE] (view) %s no new data (index was the same)", v.Dependency)
+			log.Printf("[DEBUG] (view) %s no new data (index was the same)", v.Dependency)
 			continue
 		}
 
 		v.dataLock.Lock()
-		if rm.LastIndex < v.lastIndex {
-			log.Printf("[TRACE] (view) %s had a lower index, resetting", v.Dependency)
-			v.lastIndex = 0
-			v.dataLock.Unlock()
-			continue
-		}
+		// XXX This block has the detrimental behavior of pointlessly setting
+		//   the counter to 0, and then continuing as if no data was received.
+		//   Why? Just not tested? Commenting out because it causes us to
+		//   lose updates as we're using (abusing) the LastIndex as a uuid
+		//   field instead of a counter.
+		//
+		//if rm.LastIndex < v.lastIndex {
+		//	log.Printf("[TRACE] (view) %s had a lower index, resetting", v.Dependency)
+		//	log.Printf("[DEBUG] (view) %s had a lower index, resetting", v.Dependency)
+		//	v.lastIndex = 0
+		//	v.dataLock.Unlock()
+		//	continue
+		//}
 		v.lastIndex = rm.LastIndex
 
 		if v.receivedData && reflect.DeepEqual(data, v.data) {
 			log.Printf("[TRACE] (view) %s no new data (contents were the same)", v.Dependency)
+			log.Printf("[DEBUG] (view) %s no new data (contents were the same)", v.Dependency)
 			v.dataLock.Unlock()
 			continue
 		}
 
 		if data == nil && rm.Block {
 			log.Printf("[TRACE] (view) %s asked for blocking query", v.Dependency)
+			log.Printf("[DEBUG] (view) %s asked for blocking query", v.Dependency)
 			v.dataLock.Unlock()
 			continue
 		}
 
+		log.Printf("[DEBUG] (view) %s new data", v.Dependency)
 		v.data = data
 		v.receivedData = true
 		v.dataLock.Unlock()

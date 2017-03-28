@@ -198,6 +198,9 @@ func deepCopyAndSortTags(tags []string) []string {
 // respWithMetadata is a short wrapper to return the given interface with fake
 // response metadata for non-Consul dependencies.
 func respWithMetadata(i interface{}) (interface{}, *ResponseMetadata, error) {
+	// XXX This has a bug where it doesn't register an update if it's called
+	//   more than once a second, that is because the LastIndex here uses
+	//   time in seconds.
 	return i, &ResponseMetadata{
 		LastContact: 0,
 		LastIndex:   uint64(time.Now().Unix()),
